@@ -35,7 +35,6 @@ jQuery(document).ready(function($) {
                         button.prop('disabled', false);
                         progress.hide();
                         alert('Bulk sync completed! ' + totalSynced + ' orders were synced.');
-                        refreshStats();
                     }
                 },
                 error: function() {
@@ -75,29 +74,4 @@ jQuery(document).ready(function($) {
         });
     });
     
-    // Refresh statistics
-    $('#refresh-stats').on('click', function() {
-        refreshStats();
-    });
-    
-    function refreshStats() {
-        $.ajax({
-            url: wc_address_sync_ajax.ajax_url,
-            type: 'POST',
-            data: {
-                action: 'get_address_statistics',
-                nonce: wc_address_sync_ajax.nonce
-            },
-            success: function(response) {
-                $('#incomplete-billing-orders-count').text(response.incomplete_billing_orders);
-                $('#incomplete-shipping-orders-count').text(response.incomplete_shipping_orders);
-            },
-            error: function() {
-                alert('Error loading statistics.');
-            }
-        });
-    }
-    
-    // Load stats on page load
-    refreshStats();
 });

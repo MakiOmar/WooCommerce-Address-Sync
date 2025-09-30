@@ -4,7 +4,7 @@
  * Plugin URI: https://yourwebsite.com
  * Description: Automatically syncs incomplete billing and shipping addresses in WooCommerce
  * Version: 1.0.0
- * Author: Your Name
+ * Author: Mohammed Oar
  * License: GPL v2 or later
  * Text Domain: wc-address-sync
  */
@@ -31,10 +31,10 @@ class WC_Address_Sync {
         add_action('admin_enqueue_scripts', array($this, 'admin_scripts'));
         
         // WooCommerce hooks
+        add_action('woocommerce_process_shop_order_meta', array($this, 'sync_addresses_on_order_save'), 10, 2);
         add_action('woocommerce_admin_order_data_after_billing_address', array($this, 'add_sync_button_to_order'));
         add_action('wp_ajax_sync_single_order_addresses', array($this, 'sync_single_order_addresses'));
         add_action('wp_ajax_bulk_sync_addresses', array($this, 'bulk_sync_addresses'));
-        add_action('wp_ajax_get_address_statistics', array($this, 'get_address_statistics_ajax'));
         
         // Add settings
         add_action('admin_init', array($this, 'register_settings'));
@@ -156,14 +156,6 @@ class WC_Address_Sync {
                 </div>
             </div>
             
-			<div class="card">
-				<h3><?php _e('Statistics', 'wc-address-sync'); ?></h3>
-				<p><?php _e('Orders with incomplete billing addresses:', 'wc-address-sync'); ?> <strong id="incomplete-billing-orders-count">-</strong></p>
-				<p><?php _e('Orders with incomplete shipping addresses:', 'wc-address-sync'); ?> <strong id="incomplete-shipping-orders-count">-</strong></p>
-				<button type="button" id="refresh-stats" class="button">
-					<?php _e('Refresh Statistics', 'wc-address-sync'); ?>
-				</button>
-			</div>
         </div>
         <?php
     }
@@ -203,39 +195,36 @@ class WC_Address_Sync {
         $billing_address = $order->get_address('billing');
         $shipping_address = $order->get_address('shipping');
         
-        $billing_complete = $this->is_address_complete($billing_address);
-        $shipping_complete = $this->is_address_complete($shipping_address);
-        
         $updated = false;
         
-        // Sync based on direction setting
+        $fields = array('first_name', 'last_name', 'company', 'address_1', 'address_2', 'city', 'state', 'postcode', 'country');
+        
+        // Sync based on direction setting - set only if target empty and source has value
         if ($direction === 'both' || $direction === 'billing_to_shipping') {
-            if ($billing_complete && !$shipping_complete) {
-                $order->set_shipping_first_name($billing_address['first_name']);
-                $order->set_shipping_last_name($billing_address['last_name']);
-                $order->set_shipping_company($billing_address['company']);
-                $order->set_shipping_address_1($billing_address['address_1']);
-                $order->set_shipping_address_2($billing_address['address_2']);
-                $order->set_shipping_city($billing_address['city']);
-                $order->set_shipping_state($billing_address['state']);
-                $order->set_shipping_postcode($billing_address['postcode']);
-                $order->set_shipping_country($billing_address['country']);
-                $updated = true;
+            foreach ($fields as $field) {
+                $source_value = isset($billing_address[$field]) ? $billing_address[$field] : '';
+                $target_value = isset($shipping_address[$field]) ? $shipping_address[$field] : '';
+                if (empty($target_value) && !empty($source_value)) {
+                    $setter = 'set_shipping_' . $field;
+                    if (method_exists($order, $setter)) {
+                        $order->{$setter}($source_value);
+                        $updated = true;
+                    }
+                }
             }
         }
         
         if ($direction === 'both' || $direction === 'shipping_to_billing') {
-            if ($shipping_complete && !$billing_complete) {
-                $order->set_billing_first_name($shipping_address['first_name']);
-                $order->set_billing_last_name($shipping_address['last_name']);
-                $order->set_billing_company($shipping_address['company']);
-                $order->set_billing_address_1($shipping_address['address_1']);
-                $order->set_billing_address_2($shipping_address['address_2']);
-                $order->set_billing_city($shipping_address['city']);
-                $order->set_billing_state($shipping_address['state']);
-                $order->set_billing_postcode($shipping_address['postcode']);
-                $order->set_billing_country($shipping_address['country']);
-                $updated = true;
+            foreach ($fields as $field) {
+                $source_value = isset($shipping_address[$field]) ? $shipping_address[$field] : '';
+                $target_value = isset($billing_address[$field]) ? $billing_address[$field] : '';
+                if (empty($target_value) && !empty($source_value)) {
+                    $setter = 'set_billing_' . $field;
+                    if (method_exists($order, $setter)) {
+                        $order->{$setter}($source_value);
+                        $updated = true;
+                    }
+                }
             }
         }
         
@@ -248,6 +237,27 @@ class WC_Address_Sync {
     }
     
     // Removed checkout and customer save sync handlers
+    
+    /**
+     * Sync addresses when order is saved from admin dashboard
+     */
+    public function sync_addresses_on_order_save($post_id, $post) {
+        // Check if auto sync is enabled
+        $options = get_option('wc_address_sync_options');
+        $auto_sync_enabled = isset($options['auto_sync_enabled']) ? $options['auto_sync_enabled'] : 1;
+        
+        if (!$auto_sync_enabled) {
+            return;
+        }
+        
+        // Only process shop orders
+        if ($post->post_type !== 'shop_order') {
+            return;
+        }
+        
+        // Sync the order addresses
+        $this->sync_order_addresses($post_id);
+    }
     
     /**
      * Add sync button to order edit page
@@ -324,67 +334,6 @@ class WC_Address_Sync {
         ));
     }
     
-    /**
-     * AJAX handler for getting statistics
-     */
-    public function get_address_statistics_ajax() {
-        check_ajax_referer('wc_address_sync_nonce', 'nonce');
-        
-        if (!current_user_can('manage_woocommerce')) {
-            wp_die(__('Insufficient permissions', 'wc-address-sync'));
-        }
-        
-        $stats = $this->get_statistics();
-        wp_send_json($stats);
-    }
-    
-    /**
-     * Get statistics
-     */
-    public function get_statistics() {
-        global $wpdb;
-        
-        // Count customers with incomplete billing
-        $incomplete_billing = $wpdb->get_var("
-            SELECT COUNT(*) FROM {$wpdb->users} u
-            INNER JOIN {$wpdb->usermeta} um ON u.ID = um.user_id
-            WHERE um.meta_key = 'billing_address_1' 
-            AND (um.meta_value = '' OR um.meta_value IS NULL)
-        ");
-        
-        // Count customers with incomplete shipping
-        $incomplete_shipping = $wpdb->get_var("
-            SELECT COUNT(*) FROM {$wpdb->users} u
-            INNER JOIN {$wpdb->usermeta} um ON u.ID = um.user_id
-            WHERE um.meta_key = 'shipping_address_1' 
-            AND (um.meta_value = '' OR um.meta_value IS NULL)
-        ");
-        
-        // Count orders with incomplete billing
-        $incomplete_billing_orders = $wpdb->get_var("
-            SELECT COUNT(*) FROM {$wpdb->postmeta} pm
-            INNER JOIN {$wpdb->posts} p ON pm.post_id = p.ID
-            WHERE p.post_type = 'shop_order'
-            AND pm.meta_key = '_billing_address_1'
-            AND (pm.meta_value = '' OR pm.meta_value IS NULL)
-        ");
-        
-        // Count orders with incomplete shipping
-        $incomplete_shipping_orders = $wpdb->get_var("
-            SELECT COUNT(*) FROM {$wpdb->postmeta} pm
-            INNER JOIN {$wpdb->posts} p ON pm.post_id = p.ID
-            WHERE p.post_type = 'shop_order'
-            AND pm.meta_key = '_shipping_address_1'
-            AND (pm.meta_value = '' OR pm.meta_value IS NULL)
-        ");
-        
-        return array(
-            'incomplete_billing' => $incomplete_billing,
-            'incomplete_shipping' => $incomplete_shipping,
-            'incomplete_billing_orders' => $incomplete_billing_orders,
-            'incomplete_shipping_orders' => $incomplete_shipping_orders
-        );
-    }
 }
 
 // Initialize the plugin
