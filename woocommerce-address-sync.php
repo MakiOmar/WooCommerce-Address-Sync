@@ -14,6 +14,11 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// Load debug file if debug is enabled
+if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+    require_once plugin_dir_path(__FILE__) . 'debug.php';
+}
+
 // Check if WooCommerce is active
 if (!in_array('woocommerce/woocommerce.php', apply_filters('active_plugins', get_option('active_plugins')))) {
     return;
@@ -109,6 +114,18 @@ class WC_Address_Sync {
             'wc-address-sync',
             array($this, 'admin_page')
         );
+        
+        // Add debug page if debug is enabled
+        if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+            add_submenu_page(
+                'woocommerce',
+                __('Address Sync Debug', 'wc-address-sync'),
+                __('Address Sync Debug', 'wc-address-sync'),
+                'manage_woocommerce',
+                'wc-address-sync-debug',
+                array($this, 'debug_page')
+            );
+        }
     }
     
     /**
@@ -162,6 +179,38 @@ class WC_Address_Sync {
     }
     
     /**
+     * Debug page
+     */
+    public function debug_page() {
+        if (isset($_POST['clear_log']) && wp_verify_nonce($_POST['_wpnonce'], 'clear_debug_log')) {
+            WC_Address_Sync_Debug::clear_log();
+            echo '<div class="notice notice-success"><p>Debug log cleared.</p></div>';
+        }
+        
+        $log_content = WC_Address_Sync_Debug::get_log_content();
+        ?>
+        <div class="wrap">
+            <h1><?php _e('Address Sync Debug', 'wc-address-sync'); ?></h1>
+            
+            <p><?php _e('To enable debug logging, add this to your wp-config.php:', 'wc-address-sync'); ?></p>
+            <code>define('WC_ADDRESS_SYNC_DEBUG', true);</code>
+            
+            <hr>
+            
+            <form method="post" style="display: inline;">
+                <?php wp_nonce_field('clear_debug_log'); ?>
+                <button type="submit" name="clear_log" class="button"><?php _e('Clear Debug Log', 'wc-address-sync'); ?></button>
+            </form>
+            
+            <hr>
+            
+            <h2><?php _e('Debug Log', 'wc-address-sync'); ?></h2>
+            <textarea readonly style="width: 100%; height: 500px; font-family: monospace;"><?php echo esc_textarea($log_content); ?></textarea>
+        </div>
+        <?php
+    }
+    
+    /**
      * Check if address is complete
      */
     private function is_address_complete($address) {
@@ -195,16 +244,29 @@ class WC_Address_Sync {
     public function sync_order_addresses($order_id) {
         $order = wc_get_order($order_id);
         if (!$order) {
+            if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+                WC_Address_Sync_Debug::log("Order not found", array('order_id' => $order_id));
+            }
             return false;
         }
         
         $options = get_option('wc_address_sync_options');
         $direction = isset($options['sync_direction']) ? $options['sync_direction'] : 'both';
+        $auto_sync_enabled = isset($options['auto_sync_enabled']) ? $options['auto_sync_enabled'] : 1;
+        
+        if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+            WC_Address_Sync_Debug::log("Starting sync", array(
+                'order_id' => $order_id,
+                'direction' => $direction,
+                'auto_sync_enabled' => $auto_sync_enabled
+            ));
+        }
         
         $billing_address = $order->get_address('billing');
         $shipping_address = $order->get_address('shipping');
         
         $updated = false;
+        $fields_updated = array();
         
         $fields = array('first_name', 'last_name', 'company', 'address_1', 'address_2', 'city', 'state', 'postcode', 'country');
         
@@ -213,11 +275,17 @@ class WC_Address_Sync {
             foreach ($fields as $field) {
                 $source_value = isset($billing_address[$field]) ? $billing_address[$field] : '';
                 $target_value = isset($shipping_address[$field]) ? $shipping_address[$field] : '';
+                
+                if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+                    WC_Address_Sync_Debug::debug_field_update($order_id, $field, $source_value, $target_value, 'shipping');
+                }
+                
                 if (empty($target_value) && !empty($source_value)) {
                     $setter = 'set_shipping_' . $field;
                     if (method_exists($order, $setter)) {
                         $order->{$setter}($source_value);
                         $updated = true;
+                        $fields_updated[] = "shipping_{$field}";
                     }
 					// Ensure classic postmeta storage is updated
 					$this->update_order_address_meta($order_id, 'shipping', $field, $source_value);
@@ -229,11 +297,17 @@ class WC_Address_Sync {
             foreach ($fields as $field) {
                 $source_value = isset($shipping_address[$field]) ? $shipping_address[$field] : '';
                 $target_value = isset($billing_address[$field]) ? $billing_address[$field] : '';
+                
+                if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+                    WC_Address_Sync_Debug::debug_field_update($order_id, $field, $source_value, $target_value, 'billing');
+                }
+                
                 if (empty($target_value) && !empty($source_value)) {
                     $setter = 'set_billing_' . $field;
                     if (method_exists($order, $setter)) {
                         $order->{$setter}($source_value);
                         $updated = true;
+                        $fields_updated[] = "billing_{$field}";
                     }
 					// Ensure classic postmeta storage is updated
 					$this->update_order_address_meta($order_id, 'billing', $field, $source_value);
@@ -241,9 +315,20 @@ class WC_Address_Sync {
             }
         }
         
+        if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+            WC_Address_Sync_Debug::debug_sync_process($order_id, $billing_address, $shipping_address, $direction, $fields_updated);
+        }
+        
         if ($updated) {
             $order->save();
+            if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+                WC_Address_Sync_Debug::log("Order saved after sync", array('order_id' => $order_id, 'fields_updated' => $fields_updated));
+            }
             return true;
+        }
+        
+        if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+            WC_Address_Sync_Debug::log("No updates needed", array('order_id' => $order_id));
         }
         
         return false;
