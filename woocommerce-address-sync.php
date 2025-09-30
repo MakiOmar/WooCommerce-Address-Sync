@@ -175,6 +175,14 @@ class WC_Address_Sync {
         
         return true;
     }
+
+	/**
+	 * Update order address meta directly in postmeta table (classic storage)
+	 */
+	private function update_order_address_meta($order_id, $address_type, $field, $value) {
+		$meta_key = '_' . $address_type . '_' . $field; // e.g. _billing_city, _shipping_address_1
+		update_post_meta($order_id, $meta_key, $value);
+	}
     
     /**
      * Sync addresses for a customer
@@ -211,6 +219,8 @@ class WC_Address_Sync {
                         $order->{$setter}($source_value);
                         $updated = true;
                     }
+					// Ensure classic postmeta storage is updated
+					$this->update_order_address_meta($order_id, 'shipping', $field, $source_value);
                 }
             }
         }
@@ -225,6 +235,8 @@ class WC_Address_Sync {
                         $order->{$setter}($source_value);
                         $updated = true;
                     }
+					// Ensure classic postmeta storage is updated
+					$this->update_order_address_meta($order_id, 'billing', $field, $source_value);
                 }
             }
         }
