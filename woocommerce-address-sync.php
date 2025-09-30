@@ -277,7 +277,7 @@ class WC_Address_Sync {
                 $target_value = isset($shipping_address[$field]) ? $shipping_address[$field] : '';
                 
                 if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
-                    WC_Address_Sync_Debug::debug_field_update($order_id, $field, $source_value, $target_value, 'shipping');
+                    WC_Address_Sync_Debug::debug_field_update($order_id, $field, $source_value, $target_value, 'billing_to_shipping');
                 }
                 
                 if (empty($target_value) && !empty($source_value)) {
@@ -299,7 +299,7 @@ class WC_Address_Sync {
                 $target_value = isset($billing_address[$field]) ? $billing_address[$field] : '';
                 
                 if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
-                    WC_Address_Sync_Debug::debug_field_update($order_id, $field, $source_value, $target_value, 'billing');
+                    WC_Address_Sync_Debug::debug_field_update($order_id, $field, $source_value, $target_value, 'shipping_to_billing');
                 }
                 
                 if (empty($target_value) && !empty($source_value)) {
