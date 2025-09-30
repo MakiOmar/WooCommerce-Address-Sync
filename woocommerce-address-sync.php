@@ -411,6 +411,9 @@ class WC_Address_Sync {
             <button type="button" class="button" id="sync-order-addresses" data-order-id="<?php echo $order->get_id(); ?>">
                 <?php _e('Sync Addresses', 'wc-address-sync'); ?>
             </button>
+            <button type="button" class="button" id="refresh-form-fields" data-order-id="<?php echo $order->get_id(); ?>">
+                <?php _e('Refresh Form Fields', 'wc-address-sync'); ?>
+            </button>
         </p>
         <?php
     }

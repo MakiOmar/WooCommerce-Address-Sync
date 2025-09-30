@@ -21,6 +21,7 @@ jQuery(document).ready(function($) {
         if (!orderId) return;
         
         // Fetch updated order data via AJAX
+        console.log('Fetching order addresses for order ID: ' + orderId);
         $.ajax({
             url: wc_address_sync_ajax.ajax_url,
             type: 'POST',
@@ -30,12 +31,15 @@ jQuery(document).ready(function($) {
                 nonce: wc_address_sync_ajax.nonce
             },
             success: function(response) {
+                console.log('AJAX response:', response);
                 if (response.success) {
                     updateFormFields(response.data);
+                } else {
+                    console.log('AJAX error:', response.data);
                 }
             },
-            error: function() {
-                console.log('Failed to refresh order addresses');
+            error: function(xhr, status, error) {
+                console.log('AJAX failed:', status, error);
             }
         });
     }
@@ -78,16 +82,38 @@ jQuery(document).ready(function($) {
         
         fields.forEach(function(field) {
             var value = address[field] || '';
-            var selector = 'input[name="_' + type + '_' + field + '"]';
-            var $field = $(selector);
+            var selectors = [
+                'input[name="_' + type + '_' + field + '"]',
+                'input[name="' + type + '_' + field + '"]',
+                '#' + type + '_' + field,
+                'input[id*="' + type + '_' + field + '"]'
+            ];
             
-            if ($field.length) {
+            var $field = null;
+            for (var i = 0; i < selectors.length; i++) {
+                $field = $(selectors[i]);
+                if ($field.length) {
+                    console.log('Found field for ' + type + '_' + field + ' with selector: ' + selectors[i]);
+                    break;
+                }
+            }
+            
+            if ($field && $field.length) {
+                console.log('Updating ' + type + '_' + field + ' to: ' + value);
                 $field.val(value);
                 // Trigger change event to notify other scripts
                 $field.trigger('change');
+            } else {
+                console.log('Field not found for ' + type + '_' + field);
             }
         });
     }
+    
+    // Manual refresh button
+    $(document).on('click', '#refresh-form-fields', function() {
+        console.log('Manual refresh triggered');
+        refreshOrderAddressFields();
+    });
     
     // Also refresh on page load if we detect the page was just saved
     if (window.location.search.indexOf('message=') !== -1) {
