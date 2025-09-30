@@ -230,7 +230,17 @@ class WC_Address_Sync {
 	 */
 	private function update_order_address_meta($order_id, $address_type, $field, $value) {
 		$meta_key = '_' . $address_type . '_' . $field; // e.g. _billing_city, _shipping_address_1
-		update_post_meta($order_id, $meta_key, $value);
+		$result = update_post_meta($order_id, $meta_key, $value);
+		
+		if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+			WC_Address_Sync_Debug::log("Postmeta update", array(
+				'order_id' => $order_id,
+				'meta_key' => $meta_key,
+				'value' => $value,
+				'update_result' => $result,
+				'current_meta_value' => get_post_meta($order_id, $meta_key, true)
+			));
+		}
 	}
     
     /**
@@ -323,6 +333,17 @@ class WC_Address_Sync {
             $order->save();
             if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
                 WC_Address_Sync_Debug::log("Order saved after sync", array('order_id' => $order_id, 'fields_updated' => $fields_updated));
+                
+                // Check addresses after save
+                $order_after = wc_get_order($order_id);
+                if ($order_after) {
+                    $billing_after = $order_after->get_address('billing');
+                    $shipping_after = $order_after->get_address('shipping');
+                    WC_Address_Sync_Debug::log("Addresses after save", array(
+                        'billing' => $billing_after,
+                        'shipping' => $shipping_after
+                    ));
+                }
             }
             return true;
         }
