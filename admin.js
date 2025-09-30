@@ -1,51 +1,6 @@
 jQuery(document).ready(function($) {
     
-    // Bulk sync customers
-    $('#bulk-sync-customers').on('click', function() {
-        var button = $(this);
-        var progress = $('#bulk-sync-progress');
-        var progressText = $('#progress-text');
-        
-        button.prop('disabled', true);
-        progress.show();
-        
-        var offset = 0;
-        var totalSynced = 0;
-        
-        function processBatch() {
-            $.ajax({
-                url: wc_address_sync_ajax.ajax_url,
-                type: 'POST',
-                data: {
-                    action: 'bulk_sync_addresses',
-                    type: 'customers',
-                    offset: offset,
-                    nonce: wc_address_sync_ajax.nonce
-                },
-                success: function(response) {
-                    totalSynced += response.synced;
-                    progressText.text(totalSynced + ' customers synced');
-                    
-                    if (response.has_more) {
-                        offset = response.offset;
-                        setTimeout(processBatch, 1000); // 1 second delay between batches
-                    } else {
-                        button.prop('disabled', false);
-                        progress.hide();
-                        alert('Bulk sync completed! ' + totalSynced + ' customers were synced.');
-                        refreshStats();
-                    }
-                },
-                error: function() {
-                    button.prop('disabled', false);
-                    progress.hide();
-                    alert('An error occurred during bulk sync.');
-                }
-            });
-        }
-        
-        processBatch();
-    });
+    // Removed customer bulk sync
     
     // Bulk sync orders
     $('#bulk-sync-orders').on('click', function() {
@@ -134,8 +89,6 @@ jQuery(document).ready(function($) {
                 nonce: wc_address_sync_ajax.nonce
             },
             success: function(response) {
-                $('#incomplete-billing-count').text(response.incomplete_billing);
-                $('#incomplete-shipping-count').text(response.incomplete_shipping);
                 $('#incomplete-billing-orders-count').text(response.incomplete_billing_orders);
                 $('#incomplete-shipping-orders-count').text(response.incomplete_shipping_orders);
             },

@@ -31,8 +31,6 @@ class WC_Address_Sync {
         add_action('admin_enqueue_scripts', array($this, 'admin_scripts'));
         
         // WooCommerce hooks
-        add_action('woocommerce_checkout_process', array($this, 'sync_addresses_on_checkout'));
-        add_action('woocommerce_customer_save_address', array($this, 'sync_addresses_on_save'), 10, 2);
         add_action('woocommerce_admin_order_data_after_billing_address', array($this, 'add_sync_button_to_order'));
         add_action('wp_ajax_sync_single_order_addresses', array($this, 'sync_single_order_addresses'));
         add_action('wp_ajax_bulk_sync_addresses', array($this, 'bulk_sync_addresses'));
@@ -79,7 +77,7 @@ class WC_Address_Sync {
         $options = get_option('wc_address_sync_options');
         $enabled = isset($options['auto_sync_enabled']) ? $options['auto_sync_enabled'] : 1;
         echo '<input type="checkbox" name="wc_address_sync_options[auto_sync_enabled]" value="1" ' . checked(1, $enabled, false) . ' />';
-        echo '<p class="description">' . __('Automatically sync addresses during checkout and customer profile updates', 'wc-address-sync') . '</p>';
+		echo '<p class="description">' . __('Automatically sync addresses for orders only', 'wc-address-sync') . '</p>';
     }
     
     /**
@@ -146,17 +144,7 @@ class WC_Address_Sync {
             
             <h2><?php _e('Bulk Operations', 'wc-address-sync'); ?></h2>
             
-            <div class="card">
-                <h3><?php _e('Sync All Customers', 'wc-address-sync'); ?></h3>
-                <p><?php _e('This will sync addresses for all customers who have incomplete address information.', 'wc-address-sync'); ?></p>
-                <button type="button" id="bulk-sync-customers" class="button button-primary">
-                    <?php _e('Sync All Customers', 'wc-address-sync'); ?>
-                </button>
-                <div id="bulk-sync-progress" style="display: none;">
-                    <p><?php _e('Processing...', 'wc-address-sync'); ?> <span id="progress-text">0</span></p>
-                </div>
-            </div>
-            
+			
             <div class="card">
                 <h3><?php _e('Sync All Orders', 'wc-address-sync'); ?></h3>
                 <p><?php _e('This will sync addresses for all orders with incomplete address information.', 'wc-address-sync'); ?></p>
@@ -168,16 +156,14 @@ class WC_Address_Sync {
                 </div>
             </div>
             
-            <div class="card">
-                <h3><?php _e('Statistics', 'wc-address-sync'); ?></h3>
-                <p><?php _e('Customers with incomplete billing addresses:', 'wc-address-sync'); ?> <strong id="incomplete-billing-count">-</strong></p>
-                <p><?php _e('Customers with incomplete shipping addresses:', 'wc-address-sync'); ?> <strong id="incomplete-shipping-count">-</strong></p>
-                <p><?php _e('Orders with incomplete billing addresses:', 'wc-address-sync'); ?> <strong id="incomplete-billing-orders-count">-</strong></p>
-                <p><?php _e('Orders with incomplete shipping addresses:', 'wc-address-sync'); ?> <strong id="incomplete-shipping-orders-count">-</strong></p>
-                <button type="button" id="refresh-stats" class="button">
-                    <?php _e('Refresh Statistics', 'wc-address-sync'); ?>
-                </button>
-            </div>
+			<div class="card">
+				<h3><?php _e('Statistics', 'wc-address-sync'); ?></h3>
+				<p><?php _e('Orders with incomplete billing addresses:', 'wc-address-sync'); ?> <strong id="incomplete-billing-orders-count">-</strong></p>
+				<p><?php _e('Orders with incomplete shipping addresses:', 'wc-address-sync'); ?> <strong id="incomplete-shipping-orders-count">-</strong></p>
+				<button type="button" id="refresh-stats" class="button">
+					<?php _e('Refresh Statistics', 'wc-address-sync'); ?>
+				</button>
+			</div>
         </div>
         <?php
     }
@@ -200,80 +186,7 @@ class WC_Address_Sync {
     /**
      * Sync addresses for a customer
      */
-    public function sync_customer_addresses($customer_id) {
-        $customer = new WC_Customer($customer_id);
-        $options = get_option('wc_address_sync_options');
-        $direction = isset($options['sync_direction']) ? $options['sync_direction'] : 'both';
-        
-        $billing_address = array(
-            'first_name' => $customer->get_billing_first_name(),
-            'last_name' => $customer->get_billing_last_name(),
-            'company' => $customer->get_billing_company(),
-            'address_1' => $customer->get_billing_address_1(),
-            'address_2' => $customer->get_billing_address_2(),
-            'city' => $customer->get_billing_city(),
-            'state' => $customer->get_billing_state(),
-            'postcode' => $customer->get_billing_postcode(),
-            'country' => $customer->get_billing_country(),
-            'phone' => $customer->get_billing_phone(),
-            'email' => $customer->get_billing_email()
-        );
-        
-        $shipping_address = array(
-            'first_name' => $customer->get_shipping_first_name(),
-            'last_name' => $customer->get_shipping_last_name(),
-            'company' => $customer->get_shipping_company(),
-            'address_1' => $customer->get_shipping_address_1(),
-            'address_2' => $customer->get_shipping_address_2(),
-            'city' => $customer->get_shipping_city(),
-            'state' => $customer->get_shipping_state(),
-            'postcode' => $customer->get_shipping_postcode(),
-            'country' => $customer->get_shipping_country()
-        );
-        
-        $billing_complete = $this->is_address_complete($billing_address);
-        $shipping_complete = $this->is_address_complete($shipping_address);
-        
-        $updated = false;
-        
-        // Sync based on direction setting
-        if ($direction === 'both' || $direction === 'billing_to_shipping') {
-            if ($billing_complete && !$shipping_complete) {
-                $customer->set_shipping_first_name($billing_address['first_name']);
-                $customer->set_shipping_last_name($billing_address['last_name']);
-                $customer->set_shipping_company($billing_address['company']);
-                $customer->set_shipping_address_1($billing_address['address_1']);
-                $customer->set_shipping_address_2($billing_address['address_2']);
-                $customer->set_shipping_city($billing_address['city']);
-                $customer->set_shipping_state($billing_address['state']);
-                $customer->set_shipping_postcode($billing_address['postcode']);
-                $customer->set_shipping_country($billing_address['country']);
-                $updated = true;
-            }
-        }
-        
-        if ($direction === 'both' || $direction === 'shipping_to_billing') {
-            if ($shipping_complete && !$billing_complete) {
-                $customer->set_billing_first_name($shipping_address['first_name']);
-                $customer->set_billing_last_name($shipping_address['last_name']);
-                $customer->set_billing_company($shipping_address['company']);
-                $customer->set_billing_address_1($shipping_address['address_1']);
-                $customer->set_billing_address_2($shipping_address['address_2']);
-                $customer->set_billing_city($shipping_address['city']);
-                $customer->set_billing_state($shipping_address['state']);
-                $customer->set_billing_postcode($shipping_address['postcode']);
-                $customer->set_billing_country($shipping_address['country']);
-                $updated = true;
-            }
-        }
-        
-        if ($updated) {
-            $customer->save();
-            return true;
-        }
-        
-        return false;
-    }
+    // Removed: syncing customer meta is no longer supported; orders only
     
     /**
      * Sync addresses for an order
@@ -334,22 +247,7 @@ class WC_Address_Sync {
         return false;
     }
     
-    /**
-     * Sync addresses on checkout
-     */
-    public function sync_addresses_on_checkout() {
-        if (is_user_logged_in()) {
-            $user_id = get_current_user_id();
-            $this->sync_customer_addresses($user_id);
-        }
-    }
-    
-    /**
-     * Sync addresses when customer saves address
-     */
-    public function sync_addresses_on_save($user_id, $load_address) {
-        $this->sync_customer_addresses($user_id);
-    }
+    // Removed checkout and customer save sync handlers
     
     /**
      * Add sync button to order edit page
@@ -399,23 +297,7 @@ class WC_Address_Sync {
         
         $synced = 0;
         
-        if ($type === 'customers') {
-            $customers = get_users(array(
-                'role' => 'customer',
-                'number' => $limit,
-                'offset' => $offset
-            ));
-            
-            foreach ($customers as $customer) {
-                if ($this->sync_customer_addresses($customer->ID)) {
-                    $synced++;
-                }
-            }
-            
-            $total_customers = count_users()['total_users'];
-            $has_more = ($offset + $limit) < $total_customers;
-            
-        } elseif ($type === 'orders') {
+        if ($type === 'orders') {
             $orders = wc_get_orders(array(
                 'limit' => $limit,
                 'offset' => $offset,
@@ -431,6 +313,8 @@ class WC_Address_Sync {
             $total_orders = wp_count_posts('shop_order');
             $total_orders_count = array_sum((array) $total_orders);
             $has_more = ($offset + $limit) < $total_orders_count;
+        } else {
+            $has_more = false;
         }
         
         wp_send_json(array(
