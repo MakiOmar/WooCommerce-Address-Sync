@@ -30,8 +30,9 @@ class WC_Address_Sync {
         add_action('admin_menu', array($this, 'add_admin_menu'));
         add_action('admin_enqueue_scripts', array($this, 'admin_scripts'));
         
-        // WooCommerce hooks
-        add_action('woocommerce_process_shop_order_meta', array($this, 'sync_addresses_on_order_save'), 10, 2);
+		// WooCommerce hooks
+		add_action('woocommerce_process_shop_order_meta', array($this, 'sync_addresses_on_order_save'), 10, 2);
+		add_action('woocommerce_admin_order_data_after_save', array($this, 'sync_addresses_on_order_admin_save'), 10, 1);
         add_action('woocommerce_admin_order_data_after_billing_address', array($this, 'add_sync_button_to_order'));
         add_action('wp_ajax_sync_single_order_addresses', array($this, 'sync_single_order_addresses'));
         add_action('wp_ajax_bulk_sync_addresses', array($this, 'bulk_sync_addresses'));
@@ -258,6 +259,20 @@ class WC_Address_Sync {
         // Sync the order addresses
         $this->sync_order_addresses($post_id);
     }
+
+	/**
+	 * Ensure sync runs after admin save as well
+	 */
+	public function sync_addresses_on_order_admin_save($order) {
+		$options = get_option('wc_address_sync_options');
+		$auto_sync_enabled = isset($options['auto_sync_enabled']) ? $options['auto_sync_enabled'] : 1;
+		if (!$auto_sync_enabled) {
+			return;
+		}
+		if ($order && is_a($order, 'WC_Order')) {
+			$this->sync_order_addresses($order->get_id());
+		}
+	}
     
     /**
      * Add sync button to order edit page
