@@ -41,6 +41,7 @@ class WC_Address_Sync {
         add_action('woocommerce_admin_order_data_after_billing_address', array($this, 'add_sync_button_to_order'));
         add_action('wp_ajax_sync_single_order_addresses', array($this, 'sync_single_order_addresses'));
         add_action('wp_ajax_bulk_sync_addresses', array($this, 'bulk_sync_addresses'));
+        add_action('wp_ajax_get_order_addresses', array($this, 'get_order_addresses_ajax'));
         
         // Add settings
         add_action('admin_init', array($this, 'register_settings'));
@@ -136,6 +137,15 @@ class WC_Address_Sync {
             wp_enqueue_script('jquery');
             wp_enqueue_script('wc-address-sync-admin', plugin_dir_url(__FILE__) . 'admin.js', array('jquery'), '1.0.0', true);
             wp_localize_script('wc-address-sync-admin', 'wc_address_sync_ajax', array(
+                'ajax_url' => admin_url('admin-ajax.php'),
+                'nonce' => wp_create_nonce('wc_address_sync_nonce')
+            ));
+        }
+        
+        // Add script to order edit page to refresh form fields after save
+        if (strpos($hook, 'post.php') !== false && isset($_GET['post']) && get_post_type($_GET['post']) === 'shop_order') {
+            wp_enqueue_script('wc-address-sync-order-edit', plugin_dir_url(__FILE__) . 'order-edit.js', array('jquery'), '1.0.0', true);
+            wp_localize_script('wc-address-sync-order-edit', 'wc_address_sync_ajax', array(
                 'ajax_url' => admin_url('admin-ajax.php'),
                 'nonce' => wp_create_nonce('wc_address_sync_nonce')
             ));
@@ -464,6 +474,32 @@ class WC_Address_Sync {
             'synced' => $synced,
             'has_more' => $has_more,
             'offset' => $offset + $limit
+        ));
+    }
+    
+    /**
+     * AJAX handler for getting order addresses
+     */
+    public function get_order_addresses_ajax() {
+        check_ajax_referer('wc_address_sync_nonce', 'nonce');
+        
+        if (!current_user_can('manage_woocommerce')) {
+            wp_die(__('Insufficient permissions', 'wc-address-sync'));
+        }
+        
+        $order_id = intval($_POST['order_id']);
+        $order = wc_get_order($order_id);
+        
+        if (!$order) {
+            wp_send_json_error(__('Order not found', 'wc-address-sync'));
+        }
+        
+        $billing_address = $order->get_address('billing');
+        $shipping_address = $order->get_address('shipping');
+        
+        wp_send_json_success(array(
+            'billing' => $billing_address,
+            'shipping' => $shipping_address
         ));
     }
     
