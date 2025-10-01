@@ -109,6 +109,49 @@ jQuery(document).ready(function($) {
         });
     }
     
+    // Sync Addresses button
+    $(document).on('click', '#sync-order-addresses', function() {
+        var $button = $(this);
+        var orderId = $button.data('order-id') || getOrderId();
+        
+        if (!orderId) {
+            alert('Order ID not found');
+            return;
+        }
+        
+        $button.prop('disabled', true).text('Syncing...');
+        console.log('Manual sync triggered for order: ' + orderId);
+        
+        $.ajax({
+            url: wc_address_sync_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'sync_single_order_addresses',
+                order_id: orderId,
+                nonce: wc_address_sync_ajax.nonce
+            },
+            success: function(response) {
+                console.log('Sync response:', response);
+                $button.prop('disabled', false).text('Sync Addresses');
+                
+                if (response.success) {
+                    alert(response.message || 'Addresses synced successfully!');
+                    // Refresh the form fields to show the synced data
+                    setTimeout(function() {
+                        refreshOrderAddressFields();
+                    }, 500);
+                } else {
+                    alert(response.message || 'Failed to sync addresses');
+                }
+            },
+            error: function(xhr, status, error) {
+                console.log('Sync AJAX failed:', status, error);
+                $button.prop('disabled', false).text('Sync Addresses');
+                alert('Error syncing addresses. Check console for details.');
+            }
+        });
+    });
+    
     // Manual refresh button
     $(document).on('click', '#refresh-form-fields', function() {
         console.log('Manual refresh triggered');

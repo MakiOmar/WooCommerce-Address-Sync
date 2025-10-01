@@ -26,6 +26,8 @@ if (!in_array('woocommerce/woocommerce.php', apply_filters('active_plugins', get
 
 class WC_Address_Sync {
     
+    private $synced_orders = array(); // Track synced orders to prevent duplicate syncs
+    
     public function __construct() {
         add_action('init', array($this, 'init'));
     }
@@ -35,9 +37,8 @@ class WC_Address_Sync {
         add_action('admin_menu', array($this, 'add_admin_menu'));
         add_action('admin_enqueue_scripts', array($this, 'admin_scripts'));
         
-		// WooCommerce hooks
-		add_action('woocommerce_process_shop_order_meta', array($this, 'sync_addresses_on_order_save'), 10, 2);
-		add_action('woocommerce_admin_order_data_after_save', array($this, 'sync_addresses_on_order_admin_save'), 10, 1);
+		// WooCommerce hooks - use high priority to run AFTER WooCommerce saves the meta
+		add_action('woocommerce_process_shop_order_meta', array($this, 'sync_addresses_on_order_save'), 60, 2);
         add_action('woocommerce_admin_order_data_after_billing_address', array($this, 'add_sync_button_to_order'));
         add_action('wp_ajax_sync_single_order_addresses', array($this, 'sync_single_order_addresses'));
         add_action('wp_ajax_bulk_sync_addresses', array($this, 'bulk_sync_addresses'));
@@ -135,7 +136,7 @@ class WC_Address_Sync {
     public function admin_scripts($hook) {
         if ($hook === 'woocommerce_page_wc-address-sync') {
             wp_enqueue_script('jquery');
-            wp_enqueue_script('wc-address-sync-admin', plugin_dir_url(__FILE__) . 'admin.js', array('jquery'), '1.0.0', true);
+            wp_enqueue_script('wc-address-sync-admin', plugin_dir_url(__FILE__) . 'admin.js', array('jquery'), time(), true);
             wp_localize_script('wc-address-sync-admin', 'wc_address_sync_ajax', array(
                 'ajax_url' => admin_url('admin-ajax.php'),
                 'nonce' => wp_create_nonce('wc_address_sync_nonce')
@@ -144,7 +145,7 @@ class WC_Address_Sync {
         
         // Add script to order edit page to refresh form fields after save
         if (strpos($hook, 'post.php') !== false && isset($_GET['post']) && get_post_type($_GET['post']) === 'shop_order') {
-            wp_enqueue_script('wc-address-sync-order-edit', plugin_dir_url(__FILE__) . 'order-edit.js', array('jquery'), '1.0.0', true);
+            wp_enqueue_script('wc-address-sync-order-edit', plugin_dir_url(__FILE__) . 'order-edit.js', array('jquery'), time(), true);
             wp_localize_script('wc-address-sync-order-edit', 'wc_address_sync_ajax', array(
                 'ajax_url' => admin_url('admin-ajax.php'),
                 'nonce' => wp_create_nonce('wc_address_sync_nonce')
@@ -236,19 +237,37 @@ class WC_Address_Sync {
     }
 
 	/**
-	 * Update order address meta directly in postmeta table (classic storage)
+	 * Update order address meta - compatible with both HPOS and classic storage
 	 */
 	private function update_order_address_meta($order_id, $address_type, $field, $value) {
 		$meta_key = '_' . $address_type . '_' . $field; // e.g. _billing_city, _shipping_address_1
-		$result = update_post_meta($order_id, $meta_key, $value);
+		
+		// Check if HPOS is enabled
+		$hpos_enabled = class_exists('Automattic\WooCommerce\Utilities\OrderUtil') 
+			&& \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
+		
+		if ($hpos_enabled) {
+			// Use order object for HPOS
+			$order = wc_get_order($order_id);
+			if ($order) {
+				$order->update_meta_data($meta_key, $value);
+				$result = $order->save_meta_data();
+			} else {
+				$result = false;
+			}
+		} else {
+			// Use postmeta for classic storage
+			$result = update_post_meta($order_id, $meta_key, $value);
+		}
 		
 		if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
-			WC_Address_Sync_Debug::log("Postmeta update", array(
+			WC_Address_Sync_Debug::log("Meta update", array(
 				'order_id' => $order_id,
 				'meta_key' => $meta_key,
 				'value' => $value,
+				'hpos_enabled' => $hpos_enabled,
 				'update_result' => $result,
-				'current_meta_value' => get_post_meta($order_id, $meta_key, true)
+				'current_meta_value' => $hpos_enabled ? ($order ? $order->get_meta($meta_key) : 'order not found') : get_post_meta($order_id, $meta_key, true)
 			));
 		}
 	}
@@ -261,7 +280,15 @@ class WC_Address_Sync {
     /**
      * Sync addresses for an order
      */
-    public function sync_order_addresses($order_id) {
+    public function sync_order_addresses($order_id, $exclude_fields = array()) {
+        // Prevent duplicate syncs in the same request
+        if (isset($this->synced_orders[$order_id])) {
+            if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+                WC_Address_Sync_Debug::log("Skipping duplicate sync", array('order_id' => $order_id));
+            }
+            return false;
+        }
+        
         $order = wc_get_order($order_id);
         if (!$order) {
             if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
@@ -270,15 +297,37 @@ class WC_Address_Sync {
             return false;
         }
         
+        // Mark this order as synced
+        $this->synced_orders[$order_id] = true;
+        
         $options = get_option('wc_address_sync_options');
         $direction = isset($options['sync_direction']) ? $options['sync_direction'] : 'both';
         $auto_sync_enabled = isset($options['auto_sync_enabled']) ? $options['auto_sync_enabled'] : 1;
         
+        // Check HPOS status
+        $hpos_enabled = class_exists('Automattic\WooCommerce\Utilities\OrderUtil') 
+            && \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
+        
         if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+            // Clear cache
+            wp_cache_delete($order_id, 'post_meta');
+            
+            // Direct database query
+            global $wpdb;
+            $db_billing_city = $wpdb->get_var($wpdb->prepare(
+                "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_billing_city'",
+                $order_id
+            ));
+            
             WC_Address_Sync_Debug::log("Starting sync", array(
                 'order_id' => $order_id,
                 'direction' => $direction,
-                'auto_sync_enabled' => $auto_sync_enabled
+                'auto_sync_enabled' => $auto_sync_enabled,
+                'hpos_enabled' => $hpos_enabled,
+                'billing_city_postmeta' => get_post_meta($order_id, '_billing_city', true),
+                'billing_city_order_meta' => $order->get_meta('_billing_city'),
+                'billing_city_getter' => $order->get_billing_city(),
+                'billing_city_db_direct' => $db_billing_city
             ));
         }
         
@@ -293,6 +342,16 @@ class WC_Address_Sync {
         // Sync based on direction setting - set only if target empty and source has value
         if ($direction === 'both' || $direction === 'billing_to_shipping') {
             foreach ($fields as $field) {
+                // Skip if this field was just submitted in the form (user is intentionally setting it)
+                if (in_array("shipping_{$field}", $exclude_fields)) {
+                    if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+                        WC_Address_Sync_Debug::log("Skipping field (user submitted)", array(
+                            'field' => "shipping_{$field}"
+                        ));
+                    }
+                    continue;
+                }
+                
                 $source_value = isset($billing_address[$field]) ? $billing_address[$field] : '';
                 $target_value = isset($shipping_address[$field]) ? $shipping_address[$field] : '';
                 
@@ -315,6 +374,16 @@ class WC_Address_Sync {
         
         if ($direction === 'both' || $direction === 'shipping_to_billing') {
             foreach ($fields as $field) {
+                // Skip if this field was just submitted in the form (user is intentionally setting it)
+                if (in_array("billing_{$field}", $exclude_fields)) {
+                    if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+                        WC_Address_Sync_Debug::log("Skipping field (user submitted)", array(
+                            'field' => "billing_{$field}"
+                        ));
+                    }
+                    continue;
+                }
+                
                 $source_value = isset($shipping_address[$field]) ? $shipping_address[$field] : '';
                 $target_value = isset($billing_address[$field]) ? $billing_address[$field] : '';
                 
@@ -347,11 +416,33 @@ class WC_Address_Sync {
                 // Check addresses after save
                 $order_after = wc_get_order($order_id);
                 if ($order_after) {
+                    // Clear cache to force fresh read
+                    wp_cache_delete($order_id, 'post_meta');
+                    
+                    // Direct database query to verify
+                    global $wpdb;
+                    $db_billing_city = $wpdb->get_var($wpdb->prepare(
+                        "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_billing_city'",
+                        $order_id
+                    ));
+                    $db_shipping_city = $wpdb->get_var($wpdb->prepare(
+                        "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_shipping_city'",
+                        $order_id
+                    ));
+                    
                     $billing_after = $order_after->get_address('billing');
                     $shipping_after = $order_after->get_address('shipping');
                     WC_Address_Sync_Debug::log("Addresses after save", array(
                         'billing' => $billing_after,
-                        'shipping' => $shipping_after
+                        'shipping' => $shipping_after,
+                        'billing_city_postmeta' => get_post_meta($order_id, '_billing_city', true),
+                        'billing_city_order_meta' => $order_after->get_meta('_billing_city'),
+                        'billing_city_getter' => $order_after->get_billing_city(),
+                        'billing_city_db_direct' => $db_billing_city,
+                        'shipping_city_postmeta' => get_post_meta($order_id, '_shipping_city', true),
+                        'shipping_city_order_meta' => $order_after->get_meta('_shipping_city'),
+                        'shipping_city_getter' => $order_after->get_shipping_city(),
+                        'shipping_city_db_direct' => $db_shipping_city
                     ));
                 }
             }
@@ -359,7 +450,15 @@ class WC_Address_Sync {
         }
         
         if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
-            WC_Address_Sync_Debug::log("No updates needed", array('order_id' => $order_id));
+            WC_Address_Sync_Debug::log("No updates needed", array(
+                'order_id' => $order_id,
+                'billing_city_postmeta' => get_post_meta($order_id, '_billing_city', true),
+                'billing_city_order_meta' => $order->get_meta('_billing_city'),
+                'billing_city_getter' => $order->get_billing_city(),
+                'shipping_city_postmeta' => get_post_meta($order_id, '_shipping_city', true),
+                'shipping_city_order_meta' => $order->get_meta('_shipping_city'),
+                'shipping_city_getter' => $order->get_shipping_city()
+            ));
         }
         
         return false;
@@ -375,6 +474,32 @@ class WC_Address_Sync {
         $options = get_option('wc_address_sync_options');
         $auto_sync_enabled = isset($options['auto_sync_enabled']) ? $options['auto_sync_enabled'] : 1;
         
+        // Detect which fields were submitted in the form
+        $exclude_fields = $this->get_submitted_fields_from_post();
+        
+        if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+            // Clear cache
+            wp_cache_delete($post_id, 'post_meta');
+            
+            // Direct database query
+            global $wpdb;
+            $db_billing_city = $wpdb->get_var($wpdb->prepare(
+                "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_billing_city'",
+                $post_id
+            ));
+            
+            WC_Address_Sync_Debug::log("Hook: woocommerce_process_shop_order_meta", array(
+                'post_id' => $post_id,
+                'post_type' => $post->post_type,
+                'auto_sync_enabled' => $auto_sync_enabled,
+                'billing_city_postmeta' => get_post_meta($post_id, '_billing_city', true),
+                'billing_city_db_direct' => $db_billing_city,
+                'billing_city_from_post' => isset($_POST['_billing_city']) ? $_POST['_billing_city'] : 'not set',
+                'shipping_city_from_post' => isset($_POST['_shipping_city']) ? $_POST['_shipping_city'] : 'not set',
+                'exclude_fields' => $exclude_fields
+            ));
+        }
+        
         if (!$auto_sync_enabled) {
             return;
         }
@@ -384,22 +509,77 @@ class WC_Address_Sync {
             return;
         }
         
-        // Sync the order addresses
-        $this->sync_order_addresses($post_id);
+        // Sync the order addresses, excluding fields that were just submitted
+        $this->sync_order_addresses($post_id, $exclude_fields);
     }
 
 	/**
-	 * Ensure sync runs after admin save as well
+	 * Sync addresses when order is updated (more reliable hook)
+	 * DISABLED: This hook was causing conflicts with manual saves
 	 */
-	public function sync_addresses_on_order_admin_save($order) {
+	/*
+	public function sync_addresses_on_order_update($order_id) {
 		$options = get_option('wc_address_sync_options');
 		$auto_sync_enabled = isset($options['auto_sync_enabled']) ? $options['auto_sync_enabled'] : 1;
+		
 		if (!$auto_sync_enabled) {
 			return;
 		}
-		if ($order && is_a($order, 'WC_Order')) {
-			$this->sync_order_addresses($order->get_id());
+		
+		// Detect which fields were submitted in the form
+		$exclude_fields = $this->get_submitted_fields_from_post();
+		
+		if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+			// Clear cache
+			wp_cache_delete($order_id, 'post_meta');
+			
+			// Direct database query
+			global $wpdb;
+			$db_billing_city = $wpdb->get_var($wpdb->prepare(
+				"SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_billing_city'",
+				$order_id
+			));
+			
+			$order = wc_get_order($order_id);
+			
+			WC_Address_Sync_Debug::log("Hook: woocommerce_update_order", array(
+				'order_id' => $order_id,
+				'auto_sync_enabled' => $auto_sync_enabled,
+				'billing_city_postmeta' => get_post_meta($order_id, '_billing_city', true),
+				'billing_city_getter' => $order ? $order->get_billing_city() : 'n/a',
+				'billing_city_db_direct' => $db_billing_city,
+				'exclude_fields' => $exclude_fields
+			));
 		}
+		
+		$this->sync_order_addresses($order_id, $exclude_fields);
+	}
+	*/
+	
+	/**
+	 * Get list of fields that were submitted in the form (should be excluded from sync)
+	 */
+	private function get_submitted_fields_from_post() {
+		$exclude_fields = array();
+		$fields = array('first_name', 'last_name', 'company', 'address_1', 'address_2', 'city', 'state', 'postcode', 'country');
+		
+		// Check billing fields
+		foreach ($fields as $field) {
+			$post_key = '_billing_' . $field;
+			if (isset($_POST[$post_key]) && $_POST[$post_key] !== '') {
+				$exclude_fields[] = 'billing_' . $field;
+			}
+		}
+		
+		// Check shipping fields
+		foreach ($fields as $field) {
+			$post_key = '_shipping_' . $field;
+			if (isset($_POST[$post_key]) && $_POST[$post_key] !== '') {
+				$exclude_fields[] = 'shipping_' . $field;
+			}
+		}
+		
+		return $exclude_fields;
 	}
     
     /**
