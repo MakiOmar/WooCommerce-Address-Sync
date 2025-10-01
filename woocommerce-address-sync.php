@@ -3,7 +3,7 @@
  * Plugin Name: WooCommerce Address Sync
  * Plugin URI: https://github.com/MakiOmar/WooCommerce-Address-Sync
  * Description: Automatically syncs incomplete billing and shipping addresses in WooCommerce
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: Mohammed Omar
  * License: GPL v2 or later
  * Text Domain: wc-address-sync
@@ -33,13 +33,22 @@ if (method_exists($wc_address_sync_update_checker, 'addHttpRequestArgFilter')) {
             $options['headers'] = array();
         }
         
-        $options['headers']['User-Agent'] = 'WooCommerce-Address-Sync/1.0.1';
+        $options['headers']['User-Agent'] = 'WooCommerce-Address-Sync/1.0.2';
         $options['headers']['Accept'] = 'application/vnd.github.v3+json';
         $options['headers']['X-Plugin-Name'] = 'WooCommerce Address Sync';
-        $options['headers']['X-Plugin-Version'] = '1.0.1';
+        $options['headers']['X-Plugin-Version'] = '1.0.2';
+        $options['headers']['Cache-Control'] = 'no-cache';
         
         return $options;
     });
+}
+
+// Set check period to 12 hours (helps with faster update detection)
+$wc_address_sync_update_checker->setCheckPeriod(12);
+
+// Enable debug mode if WP_DEBUG is on
+if (defined('WP_DEBUG') && WP_DEBUG) {
+    add_filter('puc_manual_final_check-woocommerce-address-sync', '__return_true');
 }
 
 // Load debug file if debug is enabled
@@ -157,6 +166,16 @@ class WC_Address_Sync {
                 array($this, 'debug_page')
             );
         }
+        
+        // Add update checker debug page
+        add_submenu_page(
+            'woocommerce',
+            __('Address Sync Updates', 'wc-address-sync'),
+            __('Updates Check', 'wc-address-sync'),
+            'manage_woocommerce',
+            'wc-address-sync-updates',
+            array($this, 'updates_debug_page')
+        );
     }
     
     /**
@@ -246,6 +265,108 @@ class WC_Address_Sync {
             
             <h2><?php _e('Debug Log', 'wc-address-sync'); ?></h2>
             <textarea readonly style="width: 100%; height: 500px; font-family: monospace;"><?php echo esc_textarea($log_content); ?></textarea>
+        </div>
+        <?php
+    }
+    
+    /**
+     * Updates debug page
+     */
+    public function updates_debug_page() {
+        global $wc_address_sync_update_checker;
+        
+        // Handle clear cache action
+        if (isset($_POST['clear_update_cache']) && wp_verify_nonce($_POST['_wpnonce'], 'clear_update_cache')) {
+            delete_site_transient('update_plugins');
+            delete_transient('puc_request_info-woocommerce-address-sync');
+            
+            if ($wc_address_sync_update_checker) {
+                $wc_address_sync_update_checker->resetUpdateState();
+            }
+            
+            echo '<div class="notice notice-success"><p>Update cache cleared! Click "Check for Updates" below.</p></div>';
+        }
+        
+        // Handle force check action
+        if (isset($_POST['force_check']) && wp_verify_nonce($_POST['_wpnonce'], 'force_check_updates')) {
+            if ($wc_address_sync_update_checker) {
+                $wc_address_sync_update_checker->checkForUpdates();
+            }
+            echo '<div class="notice notice-success"><p>Forced update check completed!</p></div>';
+        }
+        
+        ?>
+        <div class="wrap">
+            <h1><?php _e('Plugin Update Checker Debug', 'wc-address-sync'); ?></h1>
+            
+            <div class="card">
+                <h2>Current Status</h2>
+                <?php
+                $plugin_file = WP_PLUGIN_DIR . '/woocommerce-address-sync/woocommerce-address-sync.php';
+                if (!function_exists('get_plugin_data')) {
+                    require_once ABSPATH . 'wp-admin/includes/plugin.php';
+                }
+                $plugin_data = get_plugin_data($plugin_file);
+                $current_version = $plugin_data['Version'];
+                ?>
+                <p><strong>Installed Version:</strong> <?php echo esc_html($current_version); ?></p>
+                <p><strong>Update Checker Status:</strong> <?php echo $wc_address_sync_update_checker ? 'Initialized ✓' : 'Not Initialized ✗'; ?></p>
+                <p><strong>Update Info URL:</strong> <a href="https://github.com/MakiOmar/WooCommerce-Address-Sync/raw/main/update-info.json" target="_blank">View update-info.json</a></p>
+                
+                <?php if ($wc_address_sync_update_checker): ?>
+                    <?php
+                    $update = $wc_address_sync_update_checker->getUpdate();
+                    ?>
+                    <p><strong>Update Available:</strong> 
+                        <?php if ($update): ?>
+                            <span style="color: green;">Yes - Version <?php echo esc_html($update->version); ?></span>
+                        <?php else: ?>
+                            <span>No (up to date)</span>
+                        <?php endif; ?>
+                    </p>
+                    
+                    <?php if ($update): ?>
+                        <div style="background: #e7f7e7; padding: 15px; border-left: 4px solid green; margin: 15px 0;">
+                            <h3 style="margin-top: 0;">New Version Available: <?php echo esc_html($update->version); ?></h3>
+                            <p><strong>Download URL:</strong> <?php echo esc_html($update->download_url); ?></p>
+                            <?php if (!empty($update->tested)): ?>
+                                <p><strong>Tested up to:</strong> WordPress <?php echo esc_html($update->tested); ?></p>
+                            <?php endif; ?>
+                        </div>
+                    <?php endif; ?>
+                <?php endif; ?>
+            </div>
+            
+            <div class="card" style="margin-top: 20px;">
+                <h2>Actions</h2>
+                <form method="post" style="display: inline-block; margin-right: 10px;">
+                    <?php wp_nonce_field('clear_update_cache'); ?>
+                    <button type="submit" name="clear_update_cache" class="button button-primary">Clear Update Cache</button>
+                    <p class="description">Clears WordPress update cache and plugin update checker cache</p>
+                </form>
+                
+                <form method="post" style="display: inline-block;">
+                    <?php wp_nonce_field('force_check_updates'); ?>
+                    <button type="submit" name="force_check" class="button">Force Check for Updates</button>
+                    <p class="description">Immediately checks for updates from GitHub</p>
+                </form>
+            </div>
+            
+            <div class="card" style="margin-top: 20px;">
+                <h2>Troubleshooting</h2>
+                <ol>
+                    <li>Click "Clear Update Cache" to remove cached update data</li>
+                    <li>Click "Force Check for Updates" to check for new versions immediately</li>
+                    <li>Go to Dashboard → Updates to see if update appears</li>
+                    <li>Verify update-info.json is accessible (click link above)</li>
+                </ol>
+                
+                <h3>Cache Transients</h3>
+                <ul>
+                    <li>WordPress update_plugins: <?php echo get_site_transient('update_plugins') ? 'Cached' : 'Not cached'; ?></li>
+                    <li>PUC request info: <?php echo get_transient('puc_request_info-woocommerce-address-sync') ? 'Cached' : 'Not cached'; ?></li>
+                </ul>
+            </div>
         </div>
         <?php
     }
