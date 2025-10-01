@@ -338,7 +338,7 @@ class WC_Address_Sync {
         $updated = false;
         $fields_updated = array();
         
-        $fields = array('first_name', 'last_name', 'company', 'address_1', 'address_2', 'city', 'state', 'postcode', 'country');
+        $fields = array('first_name', 'last_name', 'company', 'address_1', 'address_2', 'city', 'state', 'postcode', 'country', 'phone');
         
         // Sync based on direction setting - set only if target empty and source has value
         if ($direction === 'both' || $direction === 'billing_to_shipping') {
@@ -587,7 +587,7 @@ class WC_Address_Sync {
 	 */
 	private function get_submitted_fields_from_post() {
 		$exclude_fields = array();
-		$fields = array('first_name', 'last_name', 'company', 'address_1', 'address_2', 'city', 'state', 'postcode', 'country');
+		$fields = array('first_name', 'last_name', 'company', 'address_1', 'address_2', 'city', 'state', 'postcode', 'country', 'phone');
 		
 		// Check billing fields
 		foreach ($fields as $field) {
