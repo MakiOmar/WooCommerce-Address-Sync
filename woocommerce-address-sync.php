@@ -1,10 +1,10 @@
 <?php
 /**
  * Plugin Name: WooCommerce Address Sync
- * Plugin URI: https://yourwebsite.com
+ * Plugin URI: https://github.com/MakiOmar/WooCommerce-Address-Sync
  * Description: Automatically syncs incomplete billing and shipping addresses in WooCommerce
- * Version: 1.0.0
- * Author: Mohammed Oar
+ * Version: 1.0.1
+ * Author: Mohammed Omar
  * License: GPL v2 or later
  * Text Domain: wc-address-sync
  */
@@ -33,10 +33,10 @@ if (method_exists($wc_address_sync_update_checker, 'addHttpRequestArgFilter')) {
             $options['headers'] = array();
         }
         
-        $options['headers']['User-Agent'] = 'WooCommerce-Address-Sync/1.0.0';
+        $options['headers']['User-Agent'] = 'WooCommerce-Address-Sync/1.0.1';
         $options['headers']['Accept'] = 'application/vnd.github.v3+json';
         $options['headers']['X-Plugin-Name'] = 'WooCommerce Address Sync';
-        $options['headers']['X-Plugin-Version'] = '1.0.0';
+        $options['headers']['X-Plugin-Version'] = '1.0.1';
         
         return $options;
     });
