@@ -39,6 +39,7 @@ class WC_Address_Sync {
         
 		// WooCommerce hooks - use high priority to run AFTER WooCommerce saves the meta
 		add_action('woocommerce_process_shop_order_meta', array($this, 'sync_addresses_on_order_save'), 60, 2);
+		add_action('wpo_order_created', array($this, 'sync_addresses_on_wpo_order_created'), 60, 2);
         add_action('woocommerce_admin_order_data_after_billing_address', array($this, 'add_sync_button_to_order'));
         add_action('wp_ajax_sync_single_order_addresses', array($this, 'sync_single_order_addresses'));
         add_action('wp_ajax_bulk_sync_addresses', array($this, 'bulk_sync_addresses'));
@@ -555,6 +556,31 @@ class WC_Address_Sync {
 		$this->sync_order_addresses($order_id, $exclude_fields);
 	}
 	*/
+	
+	/**
+	 * Sync addresses when order is created via WPO hook (PDF Invoices, etc.)
+	 */
+	public function sync_addresses_on_wpo_order_created($order, $cart_data) {
+		$options = get_option('wc_address_sync_options');
+		$auto_sync_enabled = isset($options['auto_sync_enabled']) ? $options['auto_sync_enabled'] : 1;
+		
+		if (!$auto_sync_enabled) {
+			return;
+		}
+		
+		$order_id = is_object($order) ? $order->get_id() : $order;
+		
+		if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
+			WC_Address_Sync_Debug::log("Hook: wpo_order_created", array(
+				'order_id' => $order_id,
+				'has_order_object' => is_object($order),
+				'has_cart_data' => !empty($cart_data)
+			));
+		}
+		
+		// No need to exclude fields here since this is programmatic order creation
+		$this->sync_order_addresses($order_id, array());
+	}
 	
 	/**
 	 * Get list of fields that were submitted in the form (should be excluded from sync)
