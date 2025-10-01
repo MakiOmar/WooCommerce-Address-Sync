@@ -43,9 +43,6 @@ if (method_exists($wc_address_sync_update_checker, 'addHttpRequestArgFilter')) {
     });
 }
 
-// Set check period to 12 hours (helps with faster update detection)
-$wc_address_sync_update_checker->setCheckPeriod(12);
-
 // Enable debug mode if WP_DEBUG is on
 if (defined('WP_DEBUG') && WP_DEBUG) {
     add_filter('puc_manual_final_check-woocommerce-address-sync', '__return_true');
