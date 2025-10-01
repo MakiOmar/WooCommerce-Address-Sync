@@ -1,0 +1,24 @@
+{
+    "name": "WooCommerce Address Sync",
+    "slug": "woocommerce-address-sync",
+    "version": "1.0.0",
+    "tested": "6.7",
+    "requires": "5.0",
+    "requires_php": "7.4",
+    "last_updated": "2025-10-01",
+    "homepage": "https://github.com/MakiOmar/WooCommerce-Address-Sync",
+    "author": "Mohammed Oar",
+    "author_profile": "https://github.com/MakiOmar",
+    "download_url": "https://github.com/MakiOmar/WooCommerce-Address-Sync/archive/refs/heads/main.zip",
+    "sections": {
+        "description": "A WordPress plugin that automatically synchronizes incomplete billing and shipping addresses in WooCommerce, solving the common issue where customers have complete information in one address type but incomplete in the other.",
+        "installation": "<h4>Installation</h4><ol><li>Upload the plugin files to /wp-content/plugins/woocommerce-address-sync/ directory</li><li>Activate the plugin through the 'Plugins' menu in WordPress</li><li>Go to WooCommerce > Address Sync to configure settings</li></ol>",
+        "changelog": "<h4>Version 1.0.0 - 2025-10-01</h4><ul><li>Initial release</li><li>Automatic address synchronization</li><li>Bulk sync operations</li><li>Admin interface</li><li>Flexible sync directions</li><li>Order management integration</li><li>Fixed order address sync conflicts</li><li>Added comprehensive debugging</li><li>Added HPOS compatibility</li><li>Smart field detection to exclude manually submitted fields</li><li>Added wpo_order_created hook support</li><li>Added phone field to sync</li></ul>",
+        "faq": "<h4>How does the plugin work?</h4><p>The plugin automatically syncs addresses when orders are saved or created, copying missing fields from the complete address to the incomplete one.</p><h4>Can I choose sync direction?</h4><p>Yes, you can sync billing to shipping only, shipping to billing only, or both ways.</p><h4>Does it work with HPOS?</h4><p>Yes, the plugin is fully compatible with WooCommerce High-Performance Order Storage.</p>"
+    },
+    "banners": {
+        "low": "",
+        "high": ""
+    }
+}
+

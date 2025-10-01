@@ -14,6 +14,34 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// Include the Plugin Update Checker library
+require_once plugin_dir_path(__FILE__) . 'plugin-update-checker/plugin-update-checker.php';
+
+use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
+
+// Initialize update checker
+$wc_address_sync_update_checker = PucFactory::buildUpdateChecker(
+    'https://github.com/MakiOmar/WooCommerce-Address-Sync/raw/main/update-info.json',
+    __FILE__,
+    'woocommerce-address-sync'
+);
+
+// Add custom headers to avoid rate limiting
+if (method_exists($wc_address_sync_update_checker, 'addHttpRequestArgFilter')) {
+    $wc_address_sync_update_checker->addHttpRequestArgFilter(function($options) {
+        if (!isset($options['headers'])) {
+            $options['headers'] = array();
+        }
+        
+        $options['headers']['User-Agent'] = 'WooCommerce-Address-Sync/1.0.0';
+        $options['headers']['Accept'] = 'application/vnd.github.v3+json';
+        $options['headers']['X-Plugin-Name'] = 'WooCommerce Address Sync';
+        $options['headers']['X-Plugin-Version'] = '1.0.0';
+        
+        return $options;
+    });
+}
+
 // Load debug file if debug is enabled
 if (defined('WC_ADDRESS_SYNC_DEBUG') && WC_ADDRESS_SYNC_DEBUG) {
     require_once plugin_dir_path(__FILE__) . 'debug.php';
